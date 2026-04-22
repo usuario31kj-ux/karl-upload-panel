@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karl Upload</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1em; }
+  .container { max-width: 720px; width: 100%; }
+  h1 { color: #fff; margin-bottom: 0.3em; font-size: 1.5em; }
+  .subtitle { color: #888; margin-bottom: 2em; font-size: 0.9em; }
+  .auth-box, .upload-box { background: #1a1a1a; padding: 2em; border-radius: 12px; border: 1px solid #2a2a2a; }
+  input[type=password], input[type=text] { width: 100%; padding: 0.8em; background: #0a0a0a; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 1em; margin-bottom: 1em; }
+  button { background: #7aa2f7; color: #000; border: 0; padding: 0.8em 1.6em; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 1em; width: 100%; }
+  button:hover { background: #92b4ff; }
+  .dropzone { border: 2px dashed #555; border-radius: 10px; padding: 3em 1em; text-align: center; background: #0a0a0a; cursor: pointer; transition: all 0.2s; margin-bottom: 1em; }
+  .dropzone:hover, .dropzone.dragover { border-color: #7aa2f7; background: #1a1a24; }
+  .dropzone p { margin: 0.3em 0; color: #aaa; }
+  input[type=file] { display: none; }
+  .file-info { background: #0a0a0a; padding: 1em; border-radius: 6px; margin-bottom: 1em; font-size: 0.9em; }
+  progress { width: 100%; height: 20px; margin-bottom: 1em; }
+  .log { background: #0a0a0a; padding: 1em; border-radius: 6px; font-family: 'SF Mono', Monaco, monospace; font-size: 0.85em; max-height: 300px; overflow-y: auto; margin-top: 1em; }
+  .log .ok { color: #9ece6a; }
+  .log .err { color: #f7768e; }
+  .log .info { color: #7aa2f7; }
+  .log .dim { color: #666; }
+  .error { color: #f7768e; padding: 0.5em; background: #2a1515; border-radius: 4px; margin-bottom: 1em; }
+  .hidden { display: none; }
+  .file-list { margin-top: 1.5em; padding-top: 1em; border-top: 1px solid #2a2a2a; }
+  .file-list h3 { color: #aaa; font-size: 0.9em; margin-bottom: 0.5em; }
+  .file-item { padding: 0.5em; background: #0a0a0a; border-radius: 4px; margin-bottom: 0.3em; font-size: 0.85em; font-family: monospace; color: #9ece6a; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div id="authBox" class="auth-box">
+  <h1>Karl Upload</h1>
+  <p class="subtitle">Panel privado. Ingrese la clave.</p>
+  <input type="password" id="passInput" placeholder="Clave de acceso" autofocus>
+  <div id="authError" class="error hidden"></div>
+  <button onclick="checkAuth()">Entrar</button>
+</div>
+
+<div id="uploadBox" class="upload-box hidden">
+  <h1>Karl Upload</h1>
+  <p class="subtitle">Arrastra el ZIP o selecciona. Max 500 MB.</p>
+
+  <div class="dropzone" id="drop">
+    <p><strong>Suelta el archivo aqui</strong></p>
+    <p style="font-size:0.85em;color:#666">o</p>
+    <p><button type="button" onclick="document.getElementById('fileinput').click()" style="width:auto;padding:0.6em 1.2em">Elegir archivo</button></p>
+    <input type="file" id="fileinput">
+  </div>
+
+  <div id="fileinfo" class="file-info hidden"></div>
+  <progress id="progress" value="0" max="100" class="hidden"></progress>
+
+  <div class="log" id="log">
+    <div class="dim">[sistema] Listo para recibir archivos.</div>
+  </div>
+
+  <div class="file-list">
+    <h3>Archivos ya subidos:</h3>
+    <div id="uploadedFiles"><span class="dim" style="font-size:0.85em">Cargando...</span></div>
+    <button onclick="refreshList()" style="margin-top:0.5em;width:auto;padding:0.4em 0.8em;font-size:0.85em">Refrescar lista</button>
+  </div>
+
+  <p style="margin-top:1em;font-size:0.8em;color:#666">Destino: /openclaw-data/uploads/chat-exports/ en VPS</p>
+</div>
+
+</div>
+
+<script>
+const EXPECTED_HASH = "c1d7eb5a1030fb7a77fcdbe0a83ff05296ed0e9171d85ce93c0528bc6bc0d760";
+const GATEWAY_URL = "https://gateway.srv1593908.hstgr.cloud/upload/file";
+const LIST_URL = "https://gateway.srv1593908.hstgr.cloud/upload/list?folder=chat-exports";
+const AGENT_KEY = "izi-karl-2026";
+
+async function sha256(msg) {
+  const buf = new TextEncoder().encode(msg);
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function checkAuth() {
+  const pass = document.getElementById("passInput").value;
+  const errBox = document.getElementById("authError");
+  if (!pass) { errBox.textContent = "Ingrese clave"; errBox.classList.remove("hidden"); return; }
+  const hash = await sha256(pass);
+  if (hash === EXPECTED_HASH) {
+    document.getElementById("authBox").classList.add("hidden");
+    document.getElementById("uploadBox").classList.remove("hidden");
+    sessionStorage.setItem("karl-upload-auth", "1");
+    refreshList();
+  } else {
+    errBox.textContent = "Clave incorrecta";
+    errBox.classList.remove("hidden");
+  }
+}
+
+document.getElementById("passInput").addEventListener("keypress", e => {
+  if (e.key === "Enter") checkAuth();
+});
+
+if (sessionStorage.getItem("karl-upload-auth")) {
+  document.getElementById("authBox").classList.add("hidden");
+  document.getElementById("uploadBox").classList.remove("hidden");
+  refreshList();
+}
+
+const drop = document.getElementById("drop");
+const fileInput = document.getElementById("fileinput");
+const fileInfo = document.getElementById("fileinfo");
+const progress = document.getElementById("progress");
+const log = document.getElementById("log");
+
+function logMsg(msg, type) {
+  type = type || "info";
+  const ts = new Date().toLocaleTimeString();
+  log.innerHTML += '<div class="' + type + '">[' + ts + '] ' + msg + '</div>';
+  log.scrollTop = log.scrollHeight;
+}
+
+["dragenter", "dragover"].forEach(function(e) {
+  drop.addEventListener(e, function(ev) { ev.preventDefault(); drop.classList.add("dragover"); });
+});
+["dragleave", "drop"].forEach(function(e) {
+  drop.addEventListener(e, function(ev) { ev.preventDefault(); drop.classList.remove("dragover"); });
+});
+drop.addEventListener("drop", function(ev) {
+  if (ev.dataTransfer.files.length) uploadFile(ev.dataTransfer.files[0]);
+});
+fileInput.addEventListener("change", function(ev) {
+  if (ev.target.files.length) uploadFile(ev.target.files[0]);
+});
+
+async function uploadFile(file) {
+  fileInfo.classList.remove("hidden");
+  fileInfo.innerHTML = "<strong>Archivo:</strong> " + file.name + "<br>" +
+                       "<strong>Tamano:</strong> " + (file.size / 1024 / 1024).toFixed(2) + " MB<br>" +
+                       "<strong>Tipo:</strong> " + (file.type || "?");
+  progress.classList.remove("hidden");
+  progress.value = 0;
+
+  const form = new FormData();
+  form.append("file", file);
+  form.append("folder", "chat-exports");
+  form.append("description", "Upload desde panel privado - " + new Date().toISOString());
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", GATEWAY_URL);
+  xhr.setRequestHeader("x-agent-key", AGENT_KEY);
+
+  xhr.upload.onprogress = function(e) {
+    if (e.lengthComputable) progress.value = (e.loaded / e.total) * 100;
+  };
+
+  xhr.onload = function() {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      const r = JSON.parse(xhr.responseText);
+      logMsg("OK: " + r.filename + " (" + r.size_mb + " MB)", "ok");
+      logMsg("SHA256: " + r.sha256.substring(0, 32) + "...", "dim");
+      refreshList();
+    } else {
+      logMsg("Error " + xhr.status + ": " + xhr.responseText.substring(0, 200), "err");
+    }
+  };
+
+  xhr.onerror = function() { logMsg("Error de red: " + file.name, "err"); };
+
+  logMsg("Subiendo " + file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB)...", "info");
+  xhr.send(form);
+}
+
+async function refreshList() {
+  const div = document.getElementById("uploadedFiles");
+  try {
+    const r = await fetch(LIST_URL, { headers: { "x-agent-key": AGENT_KEY }});
+    const d = await r.json();
+    if (!d.files || d.files.length === 0) {
+      div.innerHTML = '<span class="dim" style="font-size:0.85em">Ningun archivo todavia.</span>';
+      return;
+    }
+    div.innerHTML = d.files.slice(0, 20).map(function(f) {
+      return '<div class="file-item">' + f.name + ' (' + f.size_mb + ' MB) - ' + f.modified_at.substring(0, 19) + '</div>';
+    }).join("");
+  } catch (e) {
+    div.innerHTML = '<span class="err" style="font-size:0.85em">Error consultando lista: ' + e.message + '</span>';
+  }
+}
+</script>
+
+</body>
+</html>

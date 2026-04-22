@@ -68,16 +68,17 @@
     <button onclick="refreshList()" style="margin-top:0.5em;width:auto;padding:0.4em 0.8em;font-size:0.85em">Refrescar lista</button>
   </div>
 
-  <p style="margin-top:1em;font-size:0.8em;color:#666">Destino: /openclaw-data/uploads/chat-exports/ en VPS</p>
+  <p style="margin-top:1em;font-size:0.8em;color:#666">Backend via PHP proxy. Agent-key protegido server-side.</p>
 </div>
 
 </div>
 
 <script>
 const EXPECTED_HASH = "c1d7eb5a1030fb7a77fcdbe0a83ff05296ed0e9171d85ce93c0528bc6bc0d760";
-const GATEWAY_URL = "https://gateway.srv1593908.hstgr.cloud/upload/file";
-const LIST_URL = "https://gateway.srv1593908.hstgr.cloud/upload/list?folder=chat-exports";
-const AGENT_KEY = "izi-karl-2026";
+const UPLOAD_URL = "./upload.php";
+const LIST_URL = "./list.php";
+
+let sessionPass = null;
 
 async function sha256(msg) {
   const buf = new TextEncoder().encode(msg);
@@ -91,9 +92,10 @@ async function checkAuth() {
   if (!pass) { errBox.textContent = "Ingrese clave"; errBox.classList.remove("hidden"); return; }
   const hash = await sha256(pass);
   if (hash === EXPECTED_HASH) {
+    sessionPass = pass;
+    sessionStorage.setItem("karl-upload-pass", pass);
     document.getElementById("authBox").classList.add("hidden");
     document.getElementById("uploadBox").classList.remove("hidden");
-    sessionStorage.setItem("karl-upload-auth", "1");
     refreshList();
   } else {
     errBox.textContent = "Clave incorrecta";
@@ -105,7 +107,9 @@ document.getElementById("passInput").addEventListener("keypress", e => {
   if (e.key === "Enter") checkAuth();
 });
 
-if (sessionStorage.getItem("karl-upload-auth")) {
+const savedPass = sessionStorage.getItem("karl-upload-pass");
+if (savedPass) {
+  sessionPass = savedPass;
   document.getElementById("authBox").classList.add("hidden");
   document.getElementById("uploadBox").classList.remove("hidden");
   refreshList();
@@ -138,6 +142,8 @@ fileInput.addEventListener("change", function(ev) {
 });
 
 async function uploadFile(file) {
+  if (!sessionPass) { logMsg("Sesion expirada, recarga", "err"); return; }
+
   fileInfo.classList.remove("hidden");
   fileInfo.innerHTML = "<strong>Archivo:</strong> " + file.name + "<br>" +
                        "<strong>Tamano:</strong> " + (file.size / 1024 / 1024).toFixed(2) + " MB<br>" +
@@ -148,11 +154,11 @@ async function uploadFile(file) {
   const form = new FormData();
   form.append("file", file);
   form.append("folder", "chat-exports");
-  form.append("description", "Upload desde panel privado - " + new Date().toISOString());
+  form.append("description", "Upload desde panel - " + new Date().toISOString());
 
   const xhr = new XMLHttpRequest();
-  xhr.open("POST", GATEWAY_URL);
-  xhr.setRequestHeader("x-agent-key", AGENT_KEY);
+  xhr.open("POST", UPLOAD_URL);
+  xhr.setRequestHeader("x-upload-pass", sessionPass);
 
   xhr.upload.onprogress = function(e) {
     if (e.lengthComputable) progress.value = (e.loaded / e.total) * 100;
@@ -160,10 +166,14 @@ async function uploadFile(file) {
 
   xhr.onload = function() {
     if (xhr.status >= 200 && xhr.status < 300) {
-      const r = JSON.parse(xhr.responseText);
-      logMsg("OK: " + r.filename + " (" + r.size_mb + " MB)", "ok");
-      logMsg("SHA256: " + r.sha256.substring(0, 32) + "...", "dim");
-      refreshList();
+      try {
+        const r = JSON.parse(xhr.responseText);
+        logMsg("OK: " + r.filename + " (" + r.size_mb + " MB)", "ok");
+        logMsg("SHA256: " + (r.sha256 || "?").substring(0, 32) + "...", "dim");
+        refreshList();
+      } catch (e) {
+        logMsg("Response parse error: " + xhr.responseText.substring(0, 200), "err");
+      }
     } else {
       logMsg("Error " + xhr.status + ": " + xhr.responseText.substring(0, 200), "err");
     }
@@ -177,8 +187,9 @@ async function uploadFile(file) {
 
 async function refreshList() {
   const div = document.getElementById("uploadedFiles");
+  if (!sessionPass) return;
   try {
-    const r = await fetch(LIST_URL, { headers: { "x-agent-key": AGENT_KEY }});
+    const r = await fetch(LIST_URL, { headers: { "x-upload-pass": sessionPass }});
     const d = await r.json();
     if (!d.files || d.files.length === 0) {
       div.innerHTML = '<span class="dim" style="font-size:0.85em">Ningun archivo todavia.</span>';
